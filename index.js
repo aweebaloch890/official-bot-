@@ -1,5 +1,6 @@
-// index.js - Single File Discord Bot (2026 - discord.js v14)
-// Features: Moderation (mute, kick, ban, warn, clear, timeout), Welcome/Goodbye, Reaction Roles, Antispam/Antilink, Simple Giveaway, Ticket/Apply Modal, Server Info, Logging
+// index.js - Single File Discord Bot (discord.js v14)
+// Features: Moderation + Welcome/Goodbye (separate channels) + Reaction Roles + Antispam + Antilink
+// + Giveaway + Ticket/Apply Modal + Server Info + Logging + !avatar command
 
 require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
@@ -23,11 +24,11 @@ const WELCOME_CHANNEL_ID = process.env.WELCOME_CHANNEL || null;
 const GOODBYE_CHANNEL_ID = process.env.GOODBYE_CHANNEL || null;
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL || null;
 
-// In-memory stores (single file limitation)
-let reactionRoles = {}; // {msgId: {emoji: roleId}}
-let warnings = {}; // {userId: count}
-let giveaways = {}; // {msgId: {prize, winners, endTime, entrants: []}}
-const spamTrack = new Map(); // userId → {count, last, msg}
+// In-memory stores
+let reactionRoles = {};               // {msgId: {emoji: roleId}}
+let warnings = {};                    // {userId: count}
+let giveaways = {};                   // {msgId: {prize, winners, endTime, entrants: []}}
+const spamTrack = new Map();          // userId → {count, last, msg}
 
 // Log function
 async function log(guild, text) {
@@ -77,6 +78,25 @@ client.on('messageCreate', async message => {
 
   const args = message.content.slice(PREFIX.length).trim().split(/ +/);
   const cmd = args.shift().toLowerCase();
+
+  // ────────────────────────────────────────────────
+  // Avatar Command (NEW)
+  // ────────────────────────────────────────────────
+  if (cmd === 'avatar' || cmd === 'av') {
+    const target = message.mentions.members.first() || message.member;
+    const user = target.user;
+
+    const embed = new EmbedBuilder()
+      .setColor(target.displayHexColor || '#5865F2')
+      .setAuthor({ name: user.tag, iconURL: user.displayAvatarURL({ dynamic: true, size: 512 }) })
+      .setDescription(`**ID:** ${user.id}\n**Nickname:** ${target.nickname || 'None'}`)
+      .setImage(user.displayAvatarURL({ dynamic: true, size: 1024 }))
+      .setFooter({ text: `Requested by ${message.author.tag}` })
+      .setTimestamp();
+
+    message.channel.send({ embeds: [embed] });
+    return;
+  }
 
   // Ban
   if (cmd === 'ban') {
@@ -143,7 +163,7 @@ client.on('messageCreate', async message => {
     message.channel.send({ embeds: [embed] });
   }
 
-  // Reaction Role Setup: !rr emoji @role (reply to msg)
+  // Reaction Role Setup
   if (cmd === 'rr') {
     if (!message.member.permissions.has(PermissionsBitField.Flags.ManageRoles)) return message.reply('No perms!');
     const emoji = args[0];
@@ -157,7 +177,7 @@ client.on('messageCreate', async message => {
     message.reply('Reaction role set!');
   }
 
-  // Giveaway: !giveaway mins winners prize
+  // Giveaway
   if (cmd === 'giveaway') {
     if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) return message.reply('No perms!');
     const mins = parseInt(args[0]);
@@ -184,7 +204,7 @@ client.on('messageCreate', async message => {
     }, mins * 60000);
   }
 
-  // Apply/Ticket Panel: !applypanel
+  // Apply/Ticket Panel
   if (cmd === 'applypanel') {
     if (!message.member.permissions.has(PermissionsBitField.Flags.ManageChannels)) return message.reply('No perms!');
     const row = new ActionRowBuilder().addComponents(
@@ -195,7 +215,7 @@ client.on('messageCreate', async message => {
   }
 });
 
-// Reaction Roles Handlers
+// Reaction Roles
 client.on('messageReactionAdd', async (reaction, user) => {
   if (user.bot) return;
   const rr = reactionRoles[reaction.message.id];
@@ -220,7 +240,7 @@ client.on('guildMemberAdd', member => {
   }
 });
 
-// Goodbye (separate channel)
+// Goodbye
 client.on('guildMemberRemove', member => {
   if (GOODBYE_CHANNEL_ID) {
     const ch = member.guild.channels.cache.get(GOODBYE_CHANNEL_ID);
@@ -228,14 +248,13 @@ client.on('guildMemberRemove', member => {
   }
 });
 
-// Ticket / Apply Interactions
+// Ticket / Apply Modal
 client.on('interactionCreate', async interaction => {
   if (!interaction.isButton()) return;
   if (interaction.customId === 'apply') {
     const modal = new ModalBuilder().setCustomId('apply_form').setTitle('Application Form');
     const input = new TextInputBuilder().setCustomId('why').setLabel('Why join/apply?').setStyle(TextInputStyle.Paragraph).setRequired(true);
-    const row = new ActionRowBuilder().addComponents(input);
-    modal.addComponents(row);
+    modal.addComponents(new ActionRowBuilder().addComponents(input));
     await interaction.showModal(modal);
   }
 
@@ -244,11 +263,10 @@ client.on('interactionCreate', async interaction => {
     await interaction.reply({ content: `Submitted! Reason: ${why}\nWait for staff.`, ephemeral: true });
     const channel = await interaction.guild.channels.create({
       name: `apply-${interaction.user.username}`,
-      type: 0, // text channel
+      type: 0,
       permissionOverwrites: [
         { id: interaction.guild.id, deny: ['ViewChannel'] },
         { id: interaction.user.id, allow: ['ViewChannel', 'SendMessages'] },
-        // Add staff role: { id: 'STAFF_ROLE_ID', allow: ['ViewChannel', 'SendMessages'] }
       ],
     }).catch(() => {});
     if (channel) channel.send(`New application from ${interaction.user}\nReason: ${why}`);
